@@ -1,0 +1,135 @@
+service: coderecipe-appsync-cognito
+
+provider:
+  name: aws
+  runtime: nodejs8.10s
+
+functions:
+  guestsHandler:
+    handler: guestsHandler.graphqlHandler
+  registeredHandler:
+    handler: registeredHandler.graphqlHandler
+
+plugins:
+  - serverless-appsync-plugin
+  - serverless-pseudo-parameters
+
+custom:
+  defaultStage: rbeta
+  currentStage: ${opt:stage, self:custom.defaultStage}
+  userPoolName: appSync-user-pool-${self:custom.currentStage}
+  userPoolClientName: appSync-user-pool-client-${self:custom.currentStage}  
+  appSync:
+    - name: private-appsync-endpoint
+      schema: schema.graphql
+      authenticationType: AMAZON_COGNITO_USER_POOLS
+      userPoolConfig:
+        awsRegion: ${self:provider.region}
+        defaultAction: ALLOW
+        userPoolId: "#{CognitoUserPool}"
+      serviceRole: "PrivateAppSyncServiceRole"
+      mappingTemplates:
+        - dataSource: Lambda
+          type: Query
+          field: getMessage
+          request: "getMessage-request-mapping-template.txt"
+          response: "getMessage-response-mapping-template.txt"  
+      dataSources:
+        - type: AWS_LAMBDA
+          name: Lambda
+          description: 'Lambda DataSource'
+          config:
+            functionName: registeredHandler
+    - name: public-appsync-endpoint
+      schema: schema.graphql
+      authenticationType: API_KEY
+      serviceRole: "PublicAppSyncServiceRole"
+      mappingTemplates:
+        - dataSource: Lambda
+          type: Query
+          field: getMessage
+          request: "getMessage-request-mapping-template.txt"
+          response: "getMessage-response-mapping-template.txt" 
+      dataSources:
+        - type: AWS_LAMBDA
+          name: Lambda
+          description: 'Lambda DataSource'
+          config:
+            functionName: guestsHandler
+resources:
+  Resources:
+    PrivateAppSyncServiceRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        RoleName: "Lambda-PrivateAppSyncServiceRole"
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Principal:
+                Service:
+                  - "appsync.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"
+        Policies:
+          -
+            PolicyName: "Lambda-PrivateAppSyncServiceRole-Policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                -
+                  Effect: "Allow"
+                  Action:
+                    - "lambda:invokeFunction"
+                  Resource:
+                    - "arn:aws:lambda:${self:provider.region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-registeredHandler"
+                    - "arn:aws:lambda:${self:provider.region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-registeredHandler:*"
+    PublicAppSyncServiceRole:
+      Type: "AWS::IAM::Role"
+      Properties:
+        RoleName: "Lambda-PublicAppSyncServiceRole"
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            -
+              Effect: "Allow"
+              Principal:
+                Service:
+                  - "appsync.amazonaws.com"
+              Action:
+                - "sts:AssumeRole"
+        Policies:
+          -
+            PolicyName: "Lambda-PublicAppSyncServiceRole-Policy"
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                -
+                  Effect: "Allow"
+                  Action:
+                    - "lambda:invokeFunction"
+                  Resource:
+                    - "arn:aws:lambda:${self:provider.region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-guestsHandler"
+                    - "arn:aws:lambda:${self:provider.region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-guestsHandler:*"                    
+    CognitoUserPool:
+      Type: "AWS::Cognito::UserPool"
+      Properties:
+        MfaConfiguration: OFF
+        UserPoolName: ${self:custom.userPoolName}
+        UsernameAttributes:
+          - email
+        Policies:
+          PasswordPolicy:
+            MinimumLength: 6
+            RequireLowercase: False
+            RequireNumbers: True
+            RequireSymbols: False
+            RequireUppercase: True
+    CognitoUserPoolClient:
+      Type: "AWS::Cognito::UserPoolClient"
+      Properties:
+        ClientName: ${self:custom.userPoolClientName}
+        GenerateSecret: False
+        UserPoolId:
+          Ref: CognitoUserPool
