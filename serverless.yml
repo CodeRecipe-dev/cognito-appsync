@@ -2,7 +2,7 @@ service: coderecipe-appsync-cognito
 
 provider:
   name: aws
-  runtime: nodejs8.10s
+  runtime: nodejs8.10
 
 functions:
   guestsHandler:
